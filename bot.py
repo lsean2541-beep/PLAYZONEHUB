@@ -1,29 +1,30 @@
-import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.error import TelegramError
 
 # Enable logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-# --- CONFIGURATION (Environment Variables) ---
-TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@online_cazino_big") 
+# --- CONFIGURATION ---
+BOT_TOKEN = "8628532806:AAEICE60cqpf6AAr00JkS6Py47dA7osc6CU"  # Replace with your actual Bot Token
+CHANNEL_ID = "@online_cazino_big"
+TRACKING_INVITE_LINK = "https://t.me/+YOUR_TRACKING_INVITE_LINK"  # Replace with your actual invite link
 
-# Target Links
-WEBSITE_LINK = "https://cazino-big.com/?register=true&campaign_id=7&source_landing=telegram&agent_id=33"
+# Target Destination Links
+TRADING_LINK = "https://cazino-big.com/?register=true&campaign_id=7&source_landing=telegram&agent_id=33"
 SUPPORT_LINK = "https://www.cazino-big.com/article/faq?agent_id=33"
-CHANNEL_LINK = "https://t.me/online_cazino_big"
 
 
-async def is_user_subscribed(bot, user_id: int) -> bool:
-    """Checks if the user is a member of the target channel."""
+async def is_user_in_channel(app: Application, user_id: int) -> bool:
+    """Checks if the user is a member, administrator, or creator of the channel."""
     try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_USERNAME, user_id=user_id)
-        # Allowed statuses: 'member', 'creator', 'administrator'
-        if member.status in ['member', 'creator', 'administrator']:
+        member = await app.bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
+        # Allowed statuses
+        if member.status in ["member", "administrator", "creator"]:
             return True
         return False
     except TelegramError as e:
@@ -31,100 +32,100 @@ async def is_user_subscribed(bot, user_id: int) -> bool:
         return False
 
 
+def get_gatekeeper_keyboard():
+    """Returns the keyboard for Step 1 & Step 2A"""
+    keyboard = [
+        [InlineKeyboardButton("📢 Join Trading Channel", url=TRACKING_INVITE_LINK)],
+        [InlineKeyboardButton("✅ Verify Channel Join", callback_data="verify_join")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_success_keyboard():
+    """Returns the keyboard for Step 3"""
+    keyboard = [
+        [InlineKeyboardButton("🔥 Start Trading Now", url=TRADING_LINK)],
+        [InlineKeyboardButton("🤝 Contact Support / FAQ", url=SUPPORT_LINK)]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+async def send_success_state(update: Update, context: ContextTypes.DEFAULT_TYPE, is_callback=False):
+    """Sends the Step 3 Success message"""
+    text = (
+        "✅ Verification Successful!\n\n"
+        "Welcome to the zone. You now have full access to our trading platform. "
+        "Click 'Start Trading' below to set up your account and claim your campaign bonuses!"
+    )
+    reply_markup = get_success_keyboard()
+    
+    if is_callback and update.callback_query:
+        await update.callback_query.message.reply_text(text, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the /start command."""
-    user = update.effective_user
-    bot = context.bot
+    """Step 1: The Entry Point (/start command)"""
+    user_id = update.effective_user.id
     
-    # Check subscription status right away
-    subscribed = await is_user_subscribed(bot, user.id)
+    # Check if user is already a member
+    is_member = await is_user_in_channel(context.application, user_id)
     
-    if subscribed:
-        # If already joined, send success buttons immediately
-        keyboard = [
-            [InlineKeyboardButton("🔥 Start Trading Now", url=WEBSITE_LINK)],
-            [InlineKeyboardButton("🤝 Contact Support / FAQ", url=SUPPORT_LINK)]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            f"Welcome back to **PLAYHUBZONE**, {user.first_name}! 🚀\n\n"
-            "You are already verified. Click below to start trading or get support.",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+    if is_member:
+        # Condition A: Skip to Step 3
+        await send_success_state(update, context, is_callback=False)
     else:
-        # If not joined, present the gatekeeper message
-        keyboard = [
-            [InlineKeyboardButton("📢 Join Trading Channel", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("✅ Verify Channel Join", callback_data="verify_join")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            f"Welcome to **PLAYHUBZONE**, {user.first_name}! 🚀\n\n"
-            "To access our premium trading signals and start winning, you must join our official community channel first. "
-            "Click the button below to join, then click '✅ Verify Channel Join'.",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
+        # Condition B: Welcome & Gatekeeper message
+        text = (
+            "Welcome to PLAYHUBZONE! 🚀\n\n"
+            "To access our premium trading signals and start winning, you must join our "
+            "official community channel first. Click the button below to join, then click "
+            "'✅ Verify Channel Join'."
         )
+        await update.message.reply_text(text, reply_markup=get_gatekeeper_keyboard())
 
 
-async def handle_verification(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the 'Verify Channel Join' button clicks."""
+async def verify_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 2: The Verification Check (Callback query handler)"""
     query = update.callback_query
+    await query.answer()  # Acknowledge the callback click
+    
     user_id = query.from_user.id
-    bot = context.bot
+    is_member = await is_user_in_channel(context.application, user_id)
     
-    # Always answer callback queries immediately to stop the loading animation on Telegram
-    await query.answer()
-    
-    subscribed = await is_user_subscribed(bot, user_id)
-    
-    if subscribed:
-        # Success state: Show website and support buttons
-        keyboard = [
-            [InlineKeyboardButton("🔥 Start Trading Now", url=WEBSITE_LINK)],
-            [InlineKeyboardButton("🤝 Contact Support / FAQ", url=SUPPORT_LINK)]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "✅ **Verification Successful!**\n\n"
-            "Welcome to the zone. You now have full access to our trading platform. "
-            "Click 'Start Trading Now' below to setup your account and claim your campaign bonuses!",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+    if is_member:
+        # Scenario 2B: Success
+        # First delete the old gatekeeper message to clean up the chat
+        try:
+            await query.message.delete()
+        except TelegramError:
+            pass
+        await send_success_state(update, context, is_callback=True)
     else:
-        # Failure state: Loop back and force them to try again
-        keyboard = [
-            [InlineKeyboardButton("📢 Join Trading Channel", url=CHANNEL_LINK)],
-            [InlineKeyboardButton("✅ Try Verification Again", callback_data="verify_join")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "❌ **Verification Failed!**\n\n"
-            "It looks like you haven't joined our channel yet. Please click the button below to join the channel, "
-            "then tap verify again to unlock your access.",
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
+        # Scenario 2A: User DID NOT join (The Loopback)
+        text = (
+            "❌ Verification Failed!\n\n"
+            "It looks like you haven't joined our channel yet. Please click the button "
+            "below to join the channel, then come back and tap verify again to unlock your access."
         )
+        # Modify the existing message or send a new one. Sending a new one ensures they see the update clearly.
+        await query.message.reply_text(text, reply_markup=get_gatekeeper_keyboard())
 
 
 def main():
-    if not TOKEN:
-        logger.error("No BOT_TOKEN found in environment variables!")
-        return
+    """Starts the bot application."""
+    # Build the application
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    # Build the application using Long Polling (ideal for Background Workers)
-    application = Application.builder().token(TOKEN).build()
-
-    # Register handlers
+    # Handlers
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(handle_verification, pattern="^verify_join$"))
+    application.add_handler(CallbackQueryHandler(verify_button_click, pattern="^verify_join$"))
 
-    # Start the Bot
-    logger.info("Bot starting as background worker...")
+    # Start the Bot using polling (Perfect for Render Background Worker)
+    logger.info("Starting bot polling...")
     application.run_polling()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
